@@ -1,0 +1,51 @@
+include/master-slave.inc
+Warnings:
+Note	####	Sending passwords in plain text without SSL/TLS is extremely insecure.
+Note	####	Storing MySQL user name or password information in the master info repository is not secure and is therefore not recommended. Please consider using the USER and PASSWORD connection options for START SLAVE; see the 'START SLAVE Syntax' in the MySQL Manual for more information.
+[connection master]
+call mtr.add_suppression("Slave SQL: Request to stop slave SQL Thread received while applying a group that has non-transactional changes");
+include/rpl_connect.inc [creating slave_lock]
+[master]
+CREATE TABLE t(id INT);
+[slave]
+include/stop_slave.inc
+SET DEBUG_SYNC='RESET';
+SET GLOBAL DEBUG="+d,after_mysql_insert,after_show_slave_status";
+include/start_slave.inc
+[master]
+INSERT INTO t VALUES(0);
+[slave]
+check 'SHOW SLAVE STATUS' and 'SHOW SLAVE STATUS NONBLOCKING' - both should work fine
+SHOW SLAVE STATUS NONBLOCKING;
+SHOW SLAVE STATUS;
+[master]
+INSERT INTO t VALUES(1);
+[slave]
+include/rpl_connect.inc [creating slave_stop]
+[slave_stop]
+STOP SLAVE;
+[slave]
+check 'SHOW SLAVE STATUS' and 'SHOW SLAVE STATUS NONBLOCKING' - just NONBLOCKING version should works fine
+SHOW SLAVE STATUS NONBLOCKING;
+[slave_lock]
+SHOW SLAVE STATUS;
+SET DEBUG_SYNC='now WAIT_FOR signal.after_show_slave_status TIMEOUT 1';
+SIGNAL after SHOW SLAVE STATUS is 
+[slave]
+SET DEBUG_SYNC='now SIGNAL signal.continue';
+[slave]
+SET DEBUG_SYNC='now SIGNAL signal.empty';
+
+[slave_stop]
+include/wait_for_slave_to_stop.inc
+SET GLOBAL DEBUG='';
+SET DEBUG_SYNC='RESET';
+include/start_slave.inc
+SET DEBUG_SYNC='RESET';
+[master]
+SET DEBUG_SYNC='RESET';
+DROP TABLE t;
+SHOW SLAVE STATUS NOLOCK;
+SHOW WARNINGS;
+Level	Code	Message
+include/rpl_end.inc

@@ -1,0 +1,32 @@
+#
+# Test the combination of changed page tracking and non-default log block size (bug 1108874)
+#
+--source include/have_innodb.inc
+
+--disable_warnings
+DROP TABLE IF EXISTS t1;
+--enable_warnings
+
+let $MYSQLD_DATADIR= `select @@datadir`;
+
+call mtr.add_suppression("InnoDB: Warning: innodb_log_block_size has been changed from default value");
+call mtr.add_suppression("New log files created, LSN=");
+
+--source include/shutdown_mysqld.inc
+--remove_files_wildcard $MYSQLD_DATADIR ib_logfile*
+--let $restart_parameters= restart:--innodb-log-block-size=4096 --innodb-track-changed-pages=1
+--source include/start_mysqld.inc
+
+CREATE TABLE t1 (a INT, b BLOB) ENGINE=InnoDB;
+
+INSERT INTO t1 VALUES(1, REPEAT("a", 20000));
+INSERT INTO t1 VALUES(2, REPEAT("b", 20000));
+
+DROP TABLE t1;
+
+--source include/shutdown_mysqld.inc
+--file_exists $MYSQLD_DATADIR/ib_modified_log_1_0.xdb
+--remove_files_wildcard $MYSQLD_DATADIR ib_logfile*
+--remove_files_wildcard $MYSQLD_DATADIR ib_modified_log*
+--let $restart_parameters=
+--source include/start_mysqld.inc

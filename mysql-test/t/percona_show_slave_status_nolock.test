@@ -1,0 +1,118 @@
+--source include/have_debug.inc
+--source include/have_debug_sync.inc
+--source include/have_binlog_format_statement.inc
+--source include/master-slave.inc
+
+call mtr.add_suppression("Slave SQL: Request to stop slave SQL Thread received while applying a group that has non-transactional changes");
+
+--let $rpl_connection_name=slave_lock
+--let $rpl_server_number=2
+--source include/rpl_connect.inc
+
+--let $show_statement= SHOW PROCESSLIST
+--let $field= Info
+
+connection master;
+--echo [master]
+CREATE TABLE t(id INT);
+sync_slave_with_master;
+
+--echo [slave]
+--source include/stop_slave.inc
+SET DEBUG_SYNC='RESET';
+SET GLOBAL DEBUG="+d,after_mysql_insert,after_show_slave_status";
+--source include/start_slave.inc
+
+connection master;
+--echo [master]
+INSERT INTO t VALUES(0);
+
+connection slave;
+--echo [slave]
+--let $condition= 'INSERT INTO t VALUES(0)'
+--source include/wait_show_condition.inc
+
+--echo check 'SHOW SLAVE STATUS' and 'SHOW SLAVE STATUS NONBLOCKING' - both should work fine
+--disable_result_log
+SHOW SLAVE STATUS NONBLOCKING;
+SHOW SLAVE STATUS;
+--enable_result_log
+
+connection master;
+--echo [master]
+INSERT INTO t VALUES(1);
+
+connection slave;
+--echo [slave]
+--let $condition= 'INSERT INTO t VALUES(1)'
+--source include/wait_show_condition.inc
+
+--let $rpl_connection_name=slave_stop
+--let $rpl_server_number=2
+--source include/rpl_connect.inc
+
+connection slave_stop;
+--echo [slave_stop]
+send STOP SLAVE;
+
+connection slave;
+--echo [slave]
+--let $condition= 'STOP SLAVE'
+--source include/wait_show_condition.inc
+
+--echo check 'SHOW SLAVE STATUS' and 'SHOW SLAVE STATUS NONBLOCKING' - just NONBLOCKING version should works fine
+--disable_result_log
+SHOW SLAVE STATUS NONBLOCKING;
+--enable_result_log
+connection slave_lock;
+--echo [slave_lock]
+send SHOW SLAVE STATUS;
+
+connection slave;
+--let $condition= 'SHOW SLAVE STATUS'
+--source include/wait_show_condition.inc
+
+--disable_warnings
+SET DEBUG_SYNC='now WAIT_FOR signal.after_show_slave_status TIMEOUT 1';
+--enable_warnings
+
+--let current=`SELECT SUBSTR(Variable_value FROM 22) FROM INFORMATION_SCHEMA.SESSION_VARIABLES WHERE Variable_name = 'DEBUG_SYNC'`
+--echo SIGNAL after SHOW SLAVE STATUS is $current
+
+connection slave;
+--echo [slave]
+SET DEBUG_SYNC='now SIGNAL signal.continue';
+
+connection slave_lock;
+--disable_result_log
+reap;
+--enable_result_log
+
+connection slave;
+--echo [slave]
+SET DEBUG_SYNC='now SIGNAL signal.empty';
+--echo
+
+connection slave_stop;
+--echo [slave_stop]
+reap;
+--source include/wait_for_slave_to_stop.inc
+SET GLOBAL DEBUG='';
+SET DEBUG_SYNC='RESET';
+
+--source include/start_slave.inc
+SET DEBUG_SYNC='RESET';
+
+connection master;
+--echo [master]
+SET DEBUG_SYNC='RESET';
+DROP TABLE t;
+
+# 'SHOW SLAVE STATUS NOLOCK' should be treated identically to 'SHOW SLAVE STATUS NONBLOCKING'
+# and should not produce any deprecation warnings
+--disable_result_log
+SHOW SLAVE STATUS NOLOCK;
+--enable_result_log
+SHOW WARNINGS;
+
+--source include/rpl_end.inc

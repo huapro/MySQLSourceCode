@@ -1,0 +1,6 @@
+--source include/have_innodb.inc
+
+--let $number_of_steps = 13
+--let $partitioning =
+
+--source suite/innodb/include/xtradb_compressed_columns_ibd_sizes.inc

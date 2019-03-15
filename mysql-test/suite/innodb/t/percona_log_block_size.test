@@ -1,0 +1,48 @@
+#
+# Tests for innodb_log_block_size feature
+#
+--source include/have_innodb.inc
+
+--let $assert_text= innodb_log_block_size must be <> 4KB at the start of this test
+--let $assert_cond= @@innodb_log_block_size <> 4096
+--source include/assert.inc
+
+call mtr.add_suppression("New log files created");
+call mtr.add_suppression("InnoDB: Warning: innodb_log_block_size has been changed from default value");
+
+let $MYSQLD_DATADIR= `select @@datadir`;
+
+--echo #
+--echo # Bug 1155156: Verify innodb_log_block_size mismatch diagnostics
+--echo #
+--source include/shutdown_mysqld.inc
+
+--let SEARCH_FILE=$MYSQLTEST_VARDIR/tmp/my_restart.err
+
+--echo # Attempting to start server with different innodb_log_block_size without deleting logs first
+--error 1
+--exec $MYSQLD_CMD --innodb-log-block-size=4096 --log-error=$SEARCH_FILE
+
+--let SEARCH_PATTERN=.*InnoDB: Error: The block size of ib_logfile .* is not equal to innodb_log_block_size
+--source include/search_pattern_in_file.inc
+
+--echo #
+--echo # Bug 1114612: Failing assertion: n % srv_log_block_size == 0 in file os0file.c line 4269
+--echo #
+
+--remove_files_wildcard $MYSQLD_DATADIR ib_logfile*
+--let $restart_parameters= restart:--innodb-log-block-size=4096
+--source include/start_mysqld.inc
+
+CREATE TABLE t1 (a INT) ENGINE=InnoDB ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=1;
+
+INSERT INTO t1 VALUES (1), (2), (3);
+
+SELECT COUNT(*) FROM t1;
+
+--source include/shutdown_mysqld.inc
+--remove_files_wildcard $MYSQLD_DATADIR ib_logfile*
+--let $restart_parameters=
+--source include/start_mysqld.inc
+
+DROP TABLE t1;
